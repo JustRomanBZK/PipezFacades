@@ -85,6 +85,12 @@ public final class CommonEvents {
             return;
         }
         Direction side = GridUtil.gridSide(hit);
+        // GT parity: clicking a side that already has a facade does nothing (no replace, no sound).
+        if (hasFacade(level, pos, side)) {
+            event.setCanceled(true);
+            event.setCancellationResult(InteractionResult.FAIL);
+            return;
+        }
         event.setCanceled(true);
         event.setCancellationResult(InteractionResult.SUCCESS);
         if (server) {

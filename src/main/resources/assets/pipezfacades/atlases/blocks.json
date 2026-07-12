@@ -1,0 +1,8 @@
+{
+  "sources": [
+    {
+      "type": "single",
+      "resource": "pipezfacades:block/cover_plate"
+    }
+  ]
+}

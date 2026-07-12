@@ -5,12 +5,13 @@ Licensed under the GNU Lesser General Public License v3.0 (see LICENSE and COPYI
 
 Third-party content:
 
-1. Grid overlay icon textures
+1. Grid overlay icon and cover plate textures
    - src/main/resources/assets/pipezfacades/textures/gui/tool_attach_cover.png
    - src/main/resources/assets/pipezfacades/textures/gui/tool_remove_cover.png
+   - src/main/resources/assets/pipezfacades/textures/block/cover_plate.png
    Copied unmodified from GregTech CEu Modern (https://github.com/GregTechCEu/GregTech-Modern),
-   licensed under LGPL-3.0. Original paths: assets/gtceu/textures/gui/overlay/tool_attach_cover.png
-   and tool_remove_cover.png.
+   licensed under LGPL-3.0. Original paths: assets/gtceu/textures/gui/overlay/tool_attach_cover.png,
+   tool_remove_cover.png and assets/gtceu/textures/block/material_sets/dull/wire_side.png.
 
 2. Cover grid side-selection math
    - src/main/java/com/pipezfacades/GridUtil.java is a port of GregTech CEu Modern's
