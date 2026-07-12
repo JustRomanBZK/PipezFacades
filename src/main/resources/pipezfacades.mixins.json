@@ -6,6 +6,9 @@
   "mixins": [
     "PipeBlockShapeMixin"
   ],
+  "client": [
+    "client.PipeRendererMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

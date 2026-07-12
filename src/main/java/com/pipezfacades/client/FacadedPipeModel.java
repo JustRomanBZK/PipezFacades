@@ -72,20 +72,14 @@ public class FacadedPipeModel extends BakedModelWrapper<BakedModel> {
     @Override
     public ChunkRenderTypeSet getRenderTypes(BlockState state, RandomSource rand, ModelData data) {
         ChunkRenderTypeSet base = super.getRenderTypes(state, rand, data);
-        BlockState[] sides = data.get(FACADES);
-        if (sides == null) {
+        if (data.get(FACADES) == null) {
             return base;
         }
-        List<ChunkRenderTypeSet> sets = new ArrayList<>();
-        sets.add(base);
-        Minecraft mc = Minecraft.getInstance();
-        for (BlockState fs : sides) {
-            if (fs != null) {
-                BakedModel model = mc.getBlockRenderer().getBlockModel(fs);
-                sets.add(model.getRenderTypes(fs, rand, ModelData.EMPTY));
-            }
-        }
-        return ChunkRenderTypeSet.union(sets.toArray(ChunkRenderTypeSet[]::new));
+        // GT bakes ALL facade quads (camouflage, plate, backside) into the PIPE's single chunk layer —
+        // RenderType.cutoutMipped() — never the camouflage block's own layer (verified:
+        // ICoverableRenderer/FacadeCoverRenderer quads flow into the model that GTCEu registers with
+        // ItemBlockRenderTypes.setRenderLayer(cutoutMipped); the camo model is queried with layer null).
+        return ChunkRenderTypeSet.union(base, ChunkRenderTypeSet.of(RenderType.cutoutMipped()));
     }
 
     @Override
@@ -93,58 +87,65 @@ public class FacadedPipeModel extends BakedModelWrapper<BakedModel> {
                                     ModelData data, @Nullable RenderType renderType) {
         BlockState[] sides = data.get(FACADES);
         // The pipe's own quads belong only to the pipe's own layers (plain JSON models return their quads
-        // for whatever layer they're asked, so gate explicitly to avoid duplicates on facade layers).
+        // for whatever layer they're asked, so gate explicitly to avoid duplicates on the facade layer).
         List<BakedQuad> pipeQuads = (renderType == null ||
                 super.getRenderTypes(state, rand, data).contains(renderType))
                         ? super.getQuads(state, side, rand, data, renderType) : List.of();
         if (sides == null) {
             return pipeQuads;
         }
-        List<BakedQuad> quads = new ArrayList<>(pipeQuads);
+
+        List<BakedQuad> quads = new ArrayList<>();
+        // GT hides the pipe's connection visuals behind facades (FacadeCover.canPipePassThrough = false →
+        // no visual connection on that side). pipez keeps its connection arm, whose end cap lies EXACTLY
+        // in the camouflage face plane (pipe_part.json: from z=0) and z-fights it inside the mesh — so the
+        // pipe's cull-face quads are dropped on facaded sides. Unculled pipe quads (arm/core side faces)
+        // stay, like GT's pipe body.
+        if (side == null || sides[side.ordinal()] == null) {
+            quads.addAll(pipeQuads);
+        }
+
+        // All facade quads live on GT's facade layer only.
+        if (renderType != null && renderType != RenderType.cutoutMipped()) {
+            return quads;
+        }
         Minecraft mc = Minecraft.getInstance();
+        TextureAtlasSprite grey = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(PLATE_SPRITE);
         for (Direction face : Direction.values()) {
             BlockState fs = sides[face.ordinal()];
-            if (fs != null) {
-                appendFacadeQuads(quads, mc, fs, face, side, rand, renderType);
+            if (fs == null) {
+                continue;
+            }
+            BakedModel model = mc.getBlockRenderer().getBlockModel(fs);
+            boolean plate = fs.canOcclude(); // GT: FacadeCover.shouldRenderPlate()
+            float[] body = bodyBox(face);
+            if (side == face) {
+                // camouflage face: the camo model's own quads, queried with layer null like GT's
+                // ModelUtil.getBakedModelQuads; plus the plate's outer face 0.001 behind it (GT emits it).
+                quads.addAll(model.getQuads(fs, face, rand, ModelData.EMPTY, null));
+                if (plate) {
+                    quads.add(quad(face, body, grey, -1, true));
+                }
+            } else if (side == null) {
+                // back side for EVERY facade (GT pipes: shouldRenderBackSide = true): each front quad
+                // re-baked flat onto the boundary plane facing inward, keeping sprite/shade/tint...
+                float[] plane = boundaryBox(face);
+                for (BakedQuad front : model.getQuads(fs, face, rand, ModelData.EMPTY, null)) {
+                    quads.add(quad(face.getOpposite(), plane, front.getSprite(), front.getTintIndex(),
+                            front.isShade()));
+                }
+                // ...plus the plate's inner face at 1/16.
+                if (plate) {
+                    quads.add(quad(face.getOpposite(), body, grey, -1, true));
+                }
+            } else if (side != face.getOpposite()) {
+                // plate rim toward the queried side — GT emits these unconditionally (no neighbor checks).
+                if (plate) {
+                    quads.add(quad(side, body, grey, -1, true));
+                }
             }
         }
         return quads;
-    }
-
-    /** Verbatim port of GT's ICoverableRenderer.renderCovers + FacadeCoverRenderer.renderCover. */
-    private static void appendFacadeQuads(List<BakedQuad> out, Minecraft mc, BlockState fs, Direction face,
-                                          @Nullable Direction side, RandomSource rand,
-                                          @Nullable RenderType layer) {
-        BakedModel model = mc.getBlockRenderer().getBlockModel(fs);
-        if (layer != null && !model.getRenderTypes(fs, rand, ModelData.EMPTY).contains(layer)) {
-            return;
-        }
-
-        // Grey plate body — only for occluding facades (GT: FacadeCover.shouldRenderPlate = canOcclude).
-        // GT emits the plate cube's face toward every queried cull side except the inward one, which is
-        // emitted unculled (side == null).
-        if (fs.canOcclude()) {
-            TextureAtlasSprite grey = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(PLATE_SPRITE);
-            float[] body = bodyBox(face);
-            if (side == null) {
-                out.add(quad(face.getOpposite(), body, grey, -1, true));
-            } else if (side != face.getOpposite()) {
-                out.add(quad(side, body, grey, -1, true));
-            }
-        }
-
-        // Camouflage face — the block model's own quads, exactly like GT's ModelUtil.getBakedModelQuads.
-        if (side == face) {
-            out.addAll(model.getQuads(fs, face, rand, ModelData.EMPTY, layer));
-        } else if (side == null) {
-            // Back side (GT pipes have shouldRenderBackSide = true): each front quad re-baked flat onto
-            // the boundary plane facing inward, keeping its sprite, shade flag and tint index.
-            float[] plane = boundaryBox(face);
-            for (BakedQuad front : model.getQuads(fs, face, rand, ModelData.EMPTY, layer)) {
-                out.add(quad(face.getOpposite(), plane, front.getSprite(), front.getTintIndex(),
-                        front.isShade()));
-            }
-        }
     }
 
     /** Degenerate box: the full face plane exactly at the block boundary of {@code side} (like GT). */
