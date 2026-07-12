@@ -1,0 +1,21 @@
+Pipez Facades
+Copyright (c) 2026 JustRomanBZK
+
+Licensed under the GNU Lesser General Public License v3.0 (see LICENSE and COPYING).
+
+Third-party content:
+
+1. Grid overlay icon textures
+   - src/main/resources/assets/pipezfacades/textures/gui/tool_attach_cover.png
+   - src/main/resources/assets/pipezfacades/textures/gui/tool_remove_cover.png
+   Copied unmodified from GregTech CEu Modern (https://github.com/GregTechCEu/GregTech-Modern),
+   licensed under LGPL-3.0. Original paths: assets/gtceu/textures/gui/overlay/tool_attach_cover.png
+   and tool_remove_cover.png.
+
+2. Cover grid side-selection math
+   - src/main/java/com/pipezfacades/GridUtil.java is a port of GregTech CEu Modern's
+     GTUtil.determineWrenchingSide (LGPL-3.0).
+
+3. Pipez (https://github.com/henkelmax/pipez) by Max Henkel is a required runtime dependency.
+   No Pipez code or assets are included in this mod; it is integrated at runtime via Forge events
+   and a Mixin.

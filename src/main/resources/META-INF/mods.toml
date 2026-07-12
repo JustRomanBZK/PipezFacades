@@ -1,0 +1,38 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="LGPL-3.0"
+issueTrackerURL="https://github.com/JustRomanBZK/PipezFacades/issues"
+
+[[mods]]
+modId="pipezfacades"
+version="1.4.0"
+displayName="Pipez Facades"
+authors="JustRomanBZK"
+description='''
+Adds GregTech-style facade covers to pipez pipes, with the GT cover grid overlay for side selection.
+Right-click a pipe with a GregTech facade item (or sneak + right-click with any full block) to cover a side;
+sneak + right-click with an empty hand to remove. Breaking the pipe drops the facades.
+'''
+
+[[dependencies.pipezfacades]]
+    modId="forge"
+    mandatory=true
+    versionRange="[47,)"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.pipezfacades]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="[1.20.1,1.21)"
+    ordering="NONE"
+    side="BOTH"
+
+# pipez is required at runtime: without it there are no pipes to put facades on. We don't compile
+# against it (pipes are detected by their 'pipez:' registry namespace), so no dev dependency is needed.
+[[dependencies.pipezfacades]]
+    modId="pipez"
+    mandatory=true
+    versionRange="[1.0,)"
+    ordering="AFTER"
+    side="BOTH"
