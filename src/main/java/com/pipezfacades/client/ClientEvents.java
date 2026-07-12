@@ -17,99 +17,43 @@ import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.core.Direction;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
-import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.RenderHighlightEvent;
-import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.event.level.ChunkEvent;
 import net.minecraftforge.event.level.LevelEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
-import java.util.Iterator;
-import java.util.Map;
-
 /**
- * Client-only rendering:
+ * Client-only glue:
  * <ul>
- *     <li>facade plates on pipe sides ({@link RenderLevelStageEvent} + {@link FacadePlateRenderer});</li>
  *     <li>the GregTech-style cover grid overlay while aiming at a pipe with a facade item
- *         ({@link RenderHighlightEvent.Block}) — pulsing grid lines at 0.25/0.75 and tinted cells showing
- *         where the facade will go (centre = hit face, edges = perpendicular sides, corners = far side);</li>
+ *         ({@link RenderHighlightEvent.Block}) — pulsing grid lines at 0.25/0.75 and GT's cell icons;</li>
+ *     <li>chunk rebuild marking when facades change (facades are baked into the chunk mesh by
+ *         {@link FacadedPipeModel});</li>
  *     <li>client store cleanup on chunk/level unload.</li>
  * </ul>
  */
 @Mod.EventBusSubscriber(modid = PipezFacades.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class ClientEvents {
 
-    /** Only render facades within this many blocks of the camera. */
-    private static final double RENDER_DISTANCE = 128.0D;
-    private static final double RENDER_DISTANCE_SQR = RENDER_DISTANCE * RENDER_DISTANCE;
-
-    private static final RandomSource RANDOM = RandomSource.create();
-
     private ClientEvents() {
     }
 
-    // ------------------------------------------------------------------ facade plates
-
-    @SubscribeEvent
-    public static void onRenderLevel(RenderLevelStageEvent event) {
-        // Opaque/cutout facades draw with the solid terrain; translucent ones (stained glass, ...) must
-        // draw in the translucent pass, or their non-discarding depth writes x-ray everything drawn later.
-        boolean translucentPass = event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS;
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS && !translucentPass) {
-            return;
-        }
-        Map<BlockPos, BlockState[]> facades = ClientFacadeStore.all();
-        if (facades.isEmpty()) {
-            return;
-        }
+    /** Marks the sections around a changed facade dirty so the chunk mesh rebuilds with the new quads. */
+    public static void markFacadeDirty(BlockPos pos) {
         Minecraft mc = Minecraft.getInstance();
-        Level level = mc.level;
-        if (level == null) {
-            return;
+        if (mc.levelRenderer != null) {
+            mc.levelRenderer.setBlocksDirty(pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1,
+                    pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1);
         }
-
-        Vec3 cam = event.getCamera().getPosition();
-        PoseStack poseStack = event.getPoseStack();
-        MultiBufferSource.BufferSource buffers = mc.renderBuffers().bufferSource();
-
-        Iterator<Map.Entry<BlockPos, BlockState[]>> it = facades.entrySet().iterator();
-        while (it.hasNext()) {
-            Map.Entry<BlockPos, BlockState[]> entry = it.next();
-            BlockPos pos = entry.getKey();
-
-            if (pos.distToCenterSqr(cam.x, cam.y, cam.z) > RENDER_DISTANCE_SQR) {
-                continue;
-            }
-            // Lazily drop stale entries (pipe gone) so we never render ghost facades.
-            if (!PipeUtil.isPipe(level.getBlockState(pos))) {
-                it.remove();
-                continue;
-            }
-
-            BlockState[] sides = entry.getValue();
-            poseStack.pushPose();
-            poseStack.translate(pos.getX() - cam.x, pos.getY() - cam.y, pos.getZ() - cam.z);
-            for (Direction side : Direction.values()) {
-                BlockState facade = sides[side.ordinal()];
-                if (facade != null && FacadePlateRenderer.isTranslucent(facade, RANDOM) == translucentPass) {
-                    FacadePlateRenderer.render(poseStack, buffers, level, pos, side, facade, sides, RANDOM);
-                }
-            }
-            poseStack.popPose();
-        }
-
-        buffers.endBatch();
     }
 
     // ------------------------------------------------------------------ grid overlay
@@ -225,12 +169,7 @@ public final class ClientEvents {
             line(lines, pose, b, 0f, t, 1f, t, rg);
         }
 
-        // --- cell icons, GT's exact draw path ---
-        // GT (BlockHighlightRenderer) draws these through the GUI pipeline: blending on, depth test off,
-        // position-tex-color shader, NO lightmap — so the icon keeps its original texture colours instead
-        // of being darkened by world lighting. Icons are scaled 0.9 and tinted 0x44ffffff unless hovered.
-        // Placement: attach icon on every cell whose side has no facade yet (GT skips occupied sides).
-        // Removal (sneak + empty hand): GT's remove icon on cells whose side HAS a facade.
+        // --- cell icons, GT's exact draw path (GUI shader, blend on, depth off, no lightmap) ---
         RenderSystem.disableDepthTest();
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();

@@ -3,6 +3,8 @@ package com.pipezfacades.net;
 import com.pipezfacades.ClientFacadeStore;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.network.NetworkEvent;
 
 import java.util.ArrayList;
@@ -61,6 +63,12 @@ public class S2CFacadePacket {
             for (Entry e : packet.entries) {
                 ClientFacadeStore.apply(e.pos(), e.side(), e.stateId());
             }
+            // Facades are baked into the chunk mesh (FacadedPipeModel) — trigger a section rebuild.
+            DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
+                for (Entry e : packet.entries) {
+                    com.pipezfacades.client.ClientEvents.markFacadeDirty(e.pos());
+                }
+            });
         });
         ctx.get().setPacketHandled(true);
     }
