@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraftforge.client.model.data.ModelData;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -103,54 +104,57 @@ public final class FacadePlateRenderer {
     private static PlateModel buildPlate(Minecraft mc, BakedModel blockModel, BlockState facade,
                                          Direction side, BlockState[] allSides, RandomSource rand) {
         Map<Direction, List<BakedQuad>> culled = new EnumMap<>(Direction.class);
+        List<BakedQuad> unculled = new ArrayList<>();
 
-        // Camouflage face: full 16x16 plane at the block boundary, culled against solid neighbours.
-        TextureAtlasSprite camo = sprite(blockModel, facade, side, rand);
-        culled.put(side, List.of(quad(side, boundaryBox(side, 0), camo)));
+        // Camouflage face: the block model's OWN quads for that face, exactly like GT's
+        // ModelUtil.getBakedModelQuads — original UVs, rotations, sprites and tint indices (biome
+        // colours on grass/leaves work; texture pattern lines up pixel-perfect with real blocks).
+        List<BakedQuad> face = blockModel.getQuads(facade, side, rand, ModelData.EMPTY, null);
+        culled.put(side, List.copyOf(face));
 
-        List<BakedQuad> unculled;
         if (facade.canOcclude()) {
-            // GT parity (FacadeCover.shouldRenderPlate): occluding facades get the grey plate body —
-            // 4 rims (culled by their own facing) + the inner face (never culled).
+            // GT parity (FacadeCover.shouldRenderPlate): occluding facades get the grey plate body with
+            // GT's exact extents (0.001–0.999 laterally). Rims facing a side that also has a facade are
+            // skipped — they'd be fully hidden behind that facade's face anyway, and sitting 0.001 from
+            // its plane they z-fight in this dynamic render pass (chunk geometry gets away with it).
             TextureAtlasSprite grey = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(PLATE_SPRITE);
-            float[] body = bodyBox(side, allSides);
+            float[] body = bodyBox(side);
             for (Direction d : Direction.values()) {
-                if (d.getAxis() != side.getAxis()) {
-                    culled.put(d, List.of(quad(d, body, grey)));
+                if (d.getAxis() != side.getAxis() && allSides[d.ordinal()] == null) {
+                    culled.put(d, List.of(quad(d, body, grey, -1, true)));
                 }
             }
-            unculled = List.of(quad(side.getOpposite(), body, grey));
+            unculled.add(quad(side.getOpposite(), body, grey, -1, true));
         } else {
-            // Non-occluding facades (glass, ...) render no plate in GT — just the camouflage face plus
-            // its back side, so the pane is visible (and transparent) from inside too. The back side sits
-            // 0.001 inward: never coplanar with the front face, even if a shader pack disables culling.
-            unculled = List.of(quad(side.getOpposite(), boundaryBox(side, E), camo));
+            // Non-occluding facades (glass, ...) render no plate in GT. Instead GT re-bakes each front
+            // quad flat onto the boundary plane facing inward (FacadeCoverRenderer's back-side pass),
+            // keeping the sprite, shade flag and tint index — replicated here verbatim.
+            float[] plane = boundaryBox(side);
+            for (BakedQuad front : face) {
+                unculled.add(quad(side.getOpposite(), plane, front.getSprite(), front.getTintIndex(),
+                        front.isShade()));
+            }
         }
 
-        return new PlateModel(culled, unculled, blockModel.getParticleIcon(ModelData.EMPTY));
+        return new PlateModel(culled, List.copyOf(unculled), blockModel.getParticleIcon(ModelData.EMPTY));
     }
 
-    /** Degenerate box: the full face plane at the block boundary of {@code side}, inset inward by {@code in}. */
-    private static float[] boundaryBox(Direction side, float in) {
+    /** Degenerate box: the full face plane exactly at the block boundary of {@code side} (like GT). */
+    private static float[] boundaryBox(Direction side) {
         float[] b = { 0, 0, 0, 1, 1, 1 };
         switch (side) {
-            case NORTH -> { b[2] = in; b[5] = in; }
-            case SOUTH -> { b[2] = 1 - in; b[5] = 1 - in; }
-            case WEST -> { b[0] = in; b[3] = in; }
-            case EAST -> { b[0] = 1 - in; b[3] = 1 - in; }
-            case DOWN -> { b[1] = in; b[4] = in; }
-            case UP -> { b[1] = 1 - in; b[4] = 1 - in; }
+            case NORTH -> b[5] = 0;
+            case SOUTH -> b[2] = 1;
+            case WEST -> b[3] = 0;
+            case EAST -> b[0] = 1;
+            case DOWN -> b[4] = 0;
+            case UP -> b[1] = 1;
         }
         return b;
     }
 
-    /**
-     * The grey plate body: thickness {@code T} against {@code side}, laterally inset to E..1-E like GT.
-     * Where a perpendicular side also has a facade, the lateral bound pulls back to the full plate
-     * thickness instead — otherwise the body's edge faces would sit only 0.001 away from the neighbouring
-     * facade's face plane and z-fight with it (visible as a flickering face on fully boxed pipes).
-     */
-    private static float[] bodyBox(Direction side, BlockState[] allSides) {
+    /** The grey plate body with GT's exact extents: thickness {@code T}, laterally 0.001–0.999. */
+    private static float[] bodyBox(Direction side) {
         float x0 = E, y0 = E, z0 = E, x1 = 1 - E, y1 = 1 - E, z1 = 1 - E;
         switch (side) {
             case NORTH -> z1 = T;
@@ -160,25 +164,15 @@ public final class FacadePlateRenderer {
             case DOWN -> y1 = T;
             case UP -> y0 = 1 - T;
         }
-        float[] b = { x0, y0, z0, x1, y1, z1 };
-        for (Direction p : Direction.values()) {
-            if (p.getAxis() == side.getAxis() || allSides[p.ordinal()] == null) {
-                continue;
-            }
-            switch (p) {
-                case DOWN -> b[1] = Math.max(b[1], T);
-                case UP -> b[4] = Math.min(b[4], 1 - T);
-                case NORTH -> b[2] = Math.max(b[2], T);
-                case SOUTH -> b[5] = Math.min(b[5], 1 - T);
-                case WEST -> b[0] = Math.max(b[0], T);
-                case EAST -> b[3] = Math.min(b[3], 1 - T);
-            }
-        }
-        return b;
+        return new float[] { x0, y0, z0, x1, y1, z1 };
     }
 
-    /** One axis-aligned quad of a box, CCW from outside, with world-projected block-atlas UVs. */
-    private static BakedQuad quad(Direction d, float[] b, TextureAtlasSprite sprite) {
+    /**
+     * One axis-aligned quad of a box, CCW from outside, with position-projected UVs matching LDLib's
+     * {@code FaceQuad.cubeUV()} exactly (note DOWN mirrors V: {@code v = 16 - z}).
+     */
+    private static BakedQuad quad(Direction d, float[] b, TextureAtlasSprite sprite, int tintIndex,
+                                  boolean shade) {
         float x0 = b[0], y0 = b[1], z0 = b[2], x1 = b[3], y1 = b[4], z1 = b[5];
         float[][] v = switch (d) {
             case UP -> new float[][] { { x0, y1, z0 }, { x0, y1, z1 }, { x1, y1, z1 }, { x1, y1, z0 } };
@@ -194,7 +188,8 @@ public final class FacadePlateRenderer {
             float u16;
             float v16;
             switch (d) {
-                case UP, DOWN -> { u16 = p[0] * 16f; v16 = p[2] * 16f; }
+                case UP -> { u16 = p[0] * 16f; v16 = p[2] * 16f; }
+                case DOWN -> { u16 = p[0] * 16f; v16 = 16f - p[2] * 16f; }
                 case NORTH -> { u16 = 16f - p[0] * 16f; v16 = 16f - p[1] * 16f; }
                 case SOUTH -> { u16 = p[0] * 16f; v16 = 16f - p[1] * 16f; }
                 case WEST -> { u16 = p[2] * 16f; v16 = 16f - p[1] * 16f; }
@@ -204,31 +199,19 @@ public final class FacadePlateRenderer {
             data[o] = Float.floatToRawIntBits(p[0]);
             data[o + 1] = Float.floatToRawIntBits(p[1]);
             data[o + 2] = Float.floatToRawIntBits(p[2]);
-            data[o + 3] = 0xFFFFFFFF; // white; brightness applied by ModelBlockRenderer
+            data[o + 3] = 0xFFFFFFFF; // white; brightness/tint applied by ModelBlockRenderer
             data[o + 4] = Float.floatToRawIntBits(sprite.getU(u16));
             data[o + 5] = Float.floatToRawIntBits(sprite.getV(v16));
             data[o + 6] = 0; // lightmap, filled by the renderer
             data[o + 7] = packNormal(d);
         }
-        return new BakedQuad(data, -1, d, sprite, true);
+        return new BakedQuad(data, tintIndex, d, sprite, shade);
     }
 
     private static int packNormal(Direction d) {
         return (((byte) (d.getStepX() * 127)) & 0xFF)
                 | ((((byte) (d.getStepY() * 127)) & 0xFF) << 8)
                 | ((((byte) (d.getStepZ() * 127)) & 0xFF) << 16);
-    }
-
-    private static TextureAtlasSprite sprite(BakedModel model, BlockState state, Direction d, RandomSource rand) {
-        List<BakedQuad> quads = model.getQuads(state, d, rand);
-        if (!quads.isEmpty()) {
-            return quads.get(0).getSprite();
-        }
-        quads = model.getQuads(state, null, rand);
-        if (!quads.isEmpty()) {
-            return quads.get(0).getSprite();
-        }
-        return model.getParticleIcon(ModelData.EMPTY);
     }
 
     /**
