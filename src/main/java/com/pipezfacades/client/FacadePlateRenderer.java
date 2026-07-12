@@ -55,12 +55,18 @@ public final class FacadePlateRenderer {
     private FacadePlateRenderer() {
     }
 
-    /** Renders one facade. The pose stack must already be translated to the pipe's position. */
+    /**
+     * Renders one facade. The pose stack must already be translated to the pipe's position.
+     *
+     * @param allSides all facade states on this pipe (index = direction ordinal) — used to pull the grey
+     *                 plate body back where a neighbouring facade's face plane would otherwise sit only
+     *                 0.001 away and z-fight
+     */
     public static void render(PoseStack poseStack, MultiBufferSource buffers, Level level, BlockPos pos,
-                              Direction side, BlockState facade, RandomSource rand) {
+                              Direction side, BlockState facade, BlockState[] allSides, RandomSource rand) {
         Minecraft mc = Minecraft.getInstance();
         BakedModel blockModel = mc.getBlockRenderer().getBlockModel(facade);
-        PlateModel plate = buildPlate(mc, blockModel, facade, side, rand);
+        PlateModel plate = buildPlate(mc, blockModel, facade, side, allSides, rand);
 
         RenderType renderType = renderTypeFor(blockModel, facade, rand);
         VertexConsumer vc = buffers.getBuffer(renderType);
@@ -95,20 +101,19 @@ public final class FacadePlateRenderer {
     }
 
     private static PlateModel buildPlate(Minecraft mc, BakedModel blockModel, BlockState facade,
-                                         Direction side, RandomSource rand) {
+                                         Direction side, BlockState[] allSides, RandomSource rand) {
         Map<Direction, List<BakedQuad>> culled = new EnumMap<>(Direction.class);
 
         // Camouflage face: full 16x16 plane at the block boundary, culled against solid neighbours.
         TextureAtlasSprite camo = sprite(blockModel, facade, side, rand);
-        float[] boundary = boundaryBox(side);
-        culled.put(side, List.of(quad(side, boundary, camo)));
+        culled.put(side, List.of(quad(side, boundaryBox(side, 0), camo)));
 
         List<BakedQuad> unculled;
         if (facade.canOcclude()) {
             // GT parity (FacadeCover.shouldRenderPlate): occluding facades get the grey plate body —
             // 4 rims (culled by their own facing) + the inner face (never culled).
             TextureAtlasSprite grey = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(PLATE_SPRITE);
-            float[] body = bodyBox(side);
+            float[] body = bodyBox(side, allSides);
             for (Direction d : Direction.values()) {
                 if (d.getAxis() != side.getAxis()) {
                     culled.put(d, List.of(quad(d, body, grey)));
@@ -117,29 +122,35 @@ public final class FacadePlateRenderer {
             unculled = List.of(quad(side.getOpposite(), body, grey));
         } else {
             // Non-occluding facades (glass, ...) render no plate in GT — just the camouflage face plus
-            // its back side, so the pane is visible (and transparent) from inside too.
-            unculled = List.of(quad(side.getOpposite(), boundary, camo));
+            // its back side, so the pane is visible (and transparent) from inside too. The back side sits
+            // 0.001 inward: never coplanar with the front face, even if a shader pack disables culling.
+            unculled = List.of(quad(side.getOpposite(), boundaryBox(side, E), camo));
         }
 
         return new PlateModel(culled, unculled, blockModel.getParticleIcon(ModelData.EMPTY));
     }
 
-    /** Degenerate box: the full face plane exactly at the block boundary of {@code side}. */
-    private static float[] boundaryBox(Direction side) {
+    /** Degenerate box: the full face plane at the block boundary of {@code side}, inset inward by {@code in}. */
+    private static float[] boundaryBox(Direction side, float in) {
         float[] b = { 0, 0, 0, 1, 1, 1 };
         switch (side) {
-            case NORTH -> b[5] = 0;
-            case SOUTH -> b[2] = 1;
-            case WEST -> b[3] = 0;
-            case EAST -> b[0] = 1;
-            case DOWN -> b[4] = 0;
-            case UP -> b[1] = 1;
+            case NORTH -> { b[2] = in; b[5] = in; }
+            case SOUTH -> { b[2] = 1 - in; b[5] = 1 - in; }
+            case WEST -> { b[0] = in; b[3] = in; }
+            case EAST -> { b[0] = 1 - in; b[3] = 1 - in; }
+            case DOWN -> { b[1] = in; b[4] = in; }
+            case UP -> { b[1] = 1 - in; b[4] = 1 - in; }
         }
         return b;
     }
 
-    /** The grey plate body: thickness {@code T} against {@code side}, laterally inset to E..1-E (GT). */
-    private static float[] bodyBox(Direction side) {
+    /**
+     * The grey plate body: thickness {@code T} against {@code side}, laterally inset to E..1-E like GT.
+     * Where a perpendicular side also has a facade, the lateral bound pulls back to the full plate
+     * thickness instead — otherwise the body's edge faces would sit only 0.001 away from the neighbouring
+     * facade's face plane and z-fight with it (visible as a flickering face on fully boxed pipes).
+     */
+    private static float[] bodyBox(Direction side, BlockState[] allSides) {
         float x0 = E, y0 = E, z0 = E, x1 = 1 - E, y1 = 1 - E, z1 = 1 - E;
         switch (side) {
             case NORTH -> z1 = T;
@@ -149,7 +160,21 @@ public final class FacadePlateRenderer {
             case DOWN -> y1 = T;
             case UP -> y0 = 1 - T;
         }
-        return new float[] { x0, y0, z0, x1, y1, z1 };
+        float[] b = { x0, y0, z0, x1, y1, z1 };
+        for (Direction p : Direction.values()) {
+            if (p.getAxis() == side.getAxis() || allSides[p.ordinal()] == null) {
+                continue;
+            }
+            switch (p) {
+                case DOWN -> b[1] = Math.max(b[1], T);
+                case UP -> b[4] = Math.min(b[4], 1 - T);
+                case NORTH -> b[2] = Math.max(b[2], T);
+                case SOUTH -> b[5] = Math.min(b[5], 1 - T);
+                case WEST -> b[0] = Math.max(b[0], T);
+                case EAST -> b[3] = Math.min(b[3], 1 - T);
+            }
+        }
+        return b;
     }
 
     /** One axis-aligned quad of a box, CCW from outside, with world-projected block-atlas UVs. */

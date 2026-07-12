@@ -103,7 +103,7 @@ public final class ClientEvents {
             for (Direction side : Direction.values()) {
                 BlockState facade = sides[side.ordinal()];
                 if (facade != null && FacadePlateRenderer.isTranslucent(facade, RANDOM) == translucentPass) {
-                    FacadePlateRenderer.render(poseStack, buffers, level, pos, side, facade, RANDOM);
+                    FacadePlateRenderer.render(poseStack, buffers, level, pos, side, facade, sides, RANDOM);
                 }
             }
             poseStack.popPose();
