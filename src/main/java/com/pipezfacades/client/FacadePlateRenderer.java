@@ -100,17 +100,26 @@ public final class FacadePlateRenderer {
 
         // Camouflage face: full 16x16 plane at the block boundary, culled against solid neighbours.
         TextureAtlasSprite camo = sprite(blockModel, facade, side, rand);
-        culled.put(side, List.of(quad(side, boundaryBox(side), camo)));
+        float[] boundary = boundaryBox(side);
+        culled.put(side, List.of(quad(side, boundary, camo)));
 
-        // Grey plate body: 4 rims (culled by their own facing) + the inner face (never culled).
-        TextureAtlasSprite grey = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(PLATE_SPRITE);
-        float[] body = bodyBox(side);
-        for (Direction d : Direction.values()) {
-            if (d.getAxis() != side.getAxis()) {
-                culled.put(d, List.of(quad(d, body, grey)));
+        List<BakedQuad> unculled;
+        if (facade.canOcclude()) {
+            // GT parity (FacadeCover.shouldRenderPlate): occluding facades get the grey plate body —
+            // 4 rims (culled by their own facing) + the inner face (never culled).
+            TextureAtlasSprite grey = mc.getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(PLATE_SPRITE);
+            float[] body = bodyBox(side);
+            for (Direction d : Direction.values()) {
+                if (d.getAxis() != side.getAxis()) {
+                    culled.put(d, List.of(quad(d, body, grey)));
+                }
             }
+            unculled = List.of(quad(side.getOpposite(), body, grey));
+        } else {
+            // Non-occluding facades (glass, ...) render no plate in GT — just the camouflage face plus
+            // its back side, so the pane is visible (and transparent) from inside too.
+            unculled = List.of(quad(side.getOpposite(), boundary, camo));
         }
-        List<BakedQuad> unculled = List.of(quad(side.getOpposite(), body, grey));
 
         return new PlateModel(culled, unculled, blockModel.getParticleIcon(ModelData.EMPTY));
     }
