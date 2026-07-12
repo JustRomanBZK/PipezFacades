@@ -63,7 +63,10 @@ public final class ClientEvents {
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS) {
+        // Opaque/cutout facades draw with the solid terrain; translucent ones (stained glass, ...) must
+        // draw in the translucent pass, or their non-discarding depth writes x-ray everything drawn later.
+        boolean translucentPass = event.getStage() == RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS;
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_SOLID_BLOCKS && !translucentPass) {
             return;
         }
         Map<BlockPos, BlockState[]> facades = ClientFacadeStore.all();
@@ -99,7 +102,7 @@ public final class ClientEvents {
             poseStack.translate(pos.getX() - cam.x, pos.getY() - cam.y, pos.getZ() - cam.z);
             for (Direction side : Direction.values()) {
                 BlockState facade = sides[side.ordinal()];
-                if (facade != null) {
+                if (facade != null && FacadePlateRenderer.isTranslucent(facade, RANDOM) == translucentPass) {
                     FacadePlateRenderer.render(poseStack, buffers, level, pos, side, facade, RANDOM);
                 }
             }

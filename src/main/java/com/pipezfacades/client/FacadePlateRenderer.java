@@ -62,11 +62,36 @@ public final class FacadePlateRenderer {
         BakedModel blockModel = mc.getBlockRenderer().getBlockModel(facade);
         PlateModel plate = buildPlate(mc, blockModel, facade, side, rand);
 
-        RenderType renderType = ItemBlockRenderTypes.getChunkRenderType(facade);
+        RenderType renderType = renderTypeFor(blockModel, facade, rand);
         VertexConsumer vc = buffers.getBuffer(renderType);
         mc.getBlockRenderer().getModelRenderer().tesselateBlock(
                 level, plate, facade, pos, poseStack, vc, true, rand, facade.getSeed(pos),
                 OverlayTexture.NO_OVERLAY, ModelData.EMPTY, renderType);
+    }
+
+    /**
+     * The camouflage block's chunk render type, taken from its MODEL (the modern Forge mechanism, which
+     * modded blocks like GregTech glass use) rather than the legacy vanilla-only
+     * {@code ItemBlockRenderTypes} map — that fallback returned {@code solid} for modded glass, whose
+     * shader never discards transparent pixels, so the facade wrote depth everywhere and turned into an
+     * x-ray window.
+     */
+    public static RenderType renderTypeFor(BakedModel model, BlockState facade, RandomSource rand) {
+        var types = model.getRenderTypes(facade, rand, ModelData.EMPTY);
+        if (types.contains(RenderType.translucent())) {
+            return RenderType.translucent();
+        }
+        var it = types.iterator();
+        if (it.hasNext()) {
+            return it.next();
+        }
+        return ItemBlockRenderTypes.getChunkRenderType(facade);
+    }
+
+    /** True if this facade must be drawn in the translucent pass (after entities and water). */
+    public static boolean isTranslucent(BlockState facade, RandomSource rand) {
+        BakedModel model = Minecraft.getInstance().getBlockRenderer().getBlockModel(facade);
+        return renderTypeFor(model, facade, rand) == RenderType.translucent();
     }
 
     private static PlateModel buildPlate(Minecraft mc, BakedModel blockModel, BlockState facade,
