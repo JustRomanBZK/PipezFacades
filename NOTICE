@@ -17,6 +17,18 @@ Third-party content:
    - src/main/java/com/pipezfacades/GridUtil.java is a port of GregTech CEu Modern's
      GTUtil.determineWrenchingSide (LGPL-3.0).
 
-3. Pipez (https://github.com/henkelmax/pipez) by Max Henkel is a required runtime dependency.
+3. Quad-baking primitives (vendored)
+   - src/main/java/com/pipezfacades/client/gt/FaceQuad.java
+   - src/main/java/com/pipezfacades/client/gt/FaceQuadBakery.java
+   Vendored verbatim from LDLib (LowDragLib, https://github.com/Low-Drag-MC/LDLib-Architectury),
+   licensed under LGPL-3.0. Original paths: common/.../client/bakedpipeline/FaceQuad.java and
+   FaceQuadBakery.java. Only the package name and lombok/loader annotations were adapted; no
+   geometry/UV/normal math was changed. FaceQuadBakery itself derives from Mojang's FaceBakery.
+
+4. Facade cover quad generation (ported)
+   - src/main/java/com/pipezfacades/client/GTFacadeQuads.java is a line-for-line port of GregTech
+     CEu Modern's ICoverableRenderer.renderCovers + FacadeCoverRenderer.renderCover (LGPL-3.0).
+
+5. Pipez (https://github.com/henkelmax/pipez) by Max Henkel is a required runtime dependency.
    No Pipez code or assets are included in this mod; it is integrated at runtime via Forge events
-   and a Mixin.
+   and Mixins.
